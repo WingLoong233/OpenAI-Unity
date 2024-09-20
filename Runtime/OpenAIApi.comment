@@ -1,0 +1,520 @@
+// using System;
+// using System.IO;
+// using UnityEngine;
+// using System.Text;
+// using Newtonsoft.Json;
+// using System.Threading;
+// using System.Globalization;
+// using System.Threading.Tasks;
+// using UnityEngine.Networking;
+// using System.Collections.Generic;
+// using Newtonsoft.Json.Serialization;
+// using System.Linq;
+
+// namespace OpenAI
+// {
+//     public class OpenAIApi
+//     {
+//         /// <summary>
+//         /// 从 %User%/.openai/auth.json 读取并设置用户凭证
+//         /// 请记住，您的 API 密钥是机密！不要与他人分享或在任何客户端代码（浏览器、应用程序）中暴露它。
+//         /// 生产请求必须通过您自己的后端服务器路由，在那里可以从环境变量或密钥管理服务中安全地加载 API 密钥。
+//         /// </summary>
+//         private Configuration configuration;
+
+//         /// <summary>
+//         /// 获取或初始化配置对象
+//         /// </summary>
+//         private Configuration Configuration
+//         {
+//             get
+//             {
+//                 if (configuration == null)
+//                 {
+//                     configuration = new Configuration();
+//                 }
+//                 return configuration;
+//             }
+//         }
+
+//         /// <summary>
+//         /// OpenAI API 请求的基础路径
+//         /// </summary>
+//         private const string BASE_PATH = "https://api.openai.com/v1";
+
+//         /// <summary>
+//         /// 构造函数，可选择性地传入 API 密钥和组织 ID
+//         /// </summary>
+//         /// <param name="apiKey">OpenAI API 密钥</param>
+//         /// <param name="organization">组织 ID</param>
+//         public OpenAIApi(string apiKey = null, string organization = null)
+//         {
+//             if (apiKey != null)
+//             {
+//                 configuration = new Configuration(apiKey, organization);
+//             }
+//         }
+        
+//         /// <summary>
+//         /// 用于序列化和反序列化 PascalCase 请求对象字段为 JSON 的 snake_case 格式。创建 JSON 字符串时忽略空字段。
+//         /// </summary>
+//         private readonly JsonSerializerSettings jsonSerializerSettings = new JsonSerializerSettings()
+//         {
+//             NullValueHandling = NullValueHandling.Ignore, 
+//             ContractResolver = new DefaultContractResolver()
+//             {
+//                 NamingStrategy = new CustomNamingStrategy()
+//             },
+//             Culture = CultureInfo.InvariantCulture
+//         };
+        
+//         /// <summary>
+//         /// 向指定路径发送 HTTP 请求，使用指定的方法和可选的有效载荷
+//         /// </summary>
+//         /// <param name="path">发送请求的路径</param>
+//         /// <param name="method">用于请求的 HTTP 方法</param>
+//         /// <param name="payload">可选的 JSON 有效载荷字节数组，包含在请求中</param>
+//         /// <typeparam name="T">请求的响应类型</typeparam>
+//         /// <returns>包含指定类型请求响应的 Task</returns>
+//         private async Task<T> DispatchRequest<T>(string path, string method, byte[] payload = null) where T: IResponse
+//         {
+//             T data;
+            
+//             using (var request = UnityWebRequest.Put(path, payload))
+//             {
+//                 request.method = method;
+//                 request.SetHeaders(Configuration, ContentType.ApplicationJson);
+                
+//                 var asyncOperation = request.SendWebRequest();
+
+//                 while (!asyncOperation.isDone) await Task.Yield();
+                
+//                 data = JsonConvert.DeserializeObject<T>(request.downloadHandler.text, jsonSerializerSettings);
+//             }
+            
+//             if (data?.Error != null)
+//             {
+//                 ApiError error = data.Error;
+//                 Debug.LogError($"错误信息: {error.Message}\n错误类型: {error.Type}\n");
+//             }
+
+//             if (data?.Warning != null)
+//             {
+//                 Debug.LogWarning(data.Warning);
+//             }
+            
+//             return data;
+//         }
+        
+//         /// <summary>
+//         /// 向指定路径发送 HTTP 请求，使用指定的方法和可选的有效载荷，支持流式响应
+//         /// </summary>
+//         /// <param name="path">发送请求的路径</param>
+//         /// <param name="method">用于请求的 HTTP 方法</param>
+//         /// <param name="onResponse">响应更新时调用的回调函数</param>
+//         /// <param name="onComplete">请求完成时调用的回调函数</param>
+//         /// <param name="token">用于取消请求的取消令牌</param>
+//         /// <param name="payload">可选的 JSON 有效载荷字节数组，包含在请求中</param>
+//         private async void DispatchRequest<T>(string path, string method, Action<List<T>> onResponse, Action onComplete, CancellationTokenSource token, byte[] payload = null) where T: IResponse
+//         {
+//             using (var request = UnityWebRequest.Put(path, payload))
+//             {
+//                 request.method = method;
+//                 request.SetHeaders(Configuration, ContentType.ApplicationJson);
+                
+//                 var asyncOperation = request.SendWebRequest();
+
+//                 do
+//                 {
+//                     List<T> dataList = new List<T>();
+//                     string[] lines = request.downloadHandler.text.Split('\n').Where(line => line != "").ToArray();
+
+//                     foreach (string line in lines)
+//                     {
+//                         var value = line.Replace("data: ", "");
+                        
+//                         if (value.Contains("[DONE]")) 
+//                         {
+//                             onComplete?.Invoke();
+//                             break;
+//                         }
+                        
+//                         var data = JsonConvert.DeserializeObject<T>(value, jsonSerializerSettings);
+
+//                         if (data?.Error != null)
+//                         {
+//                             ApiError error = data.Error;
+//                             Debug.LogError($"错误信息: {error.Message}\n错误类型: {error.Type}\n");
+//                         }
+//                         else
+//                         {
+//                             dataList.Add(data);
+//                         }
+//                     }
+//                     onResponse?.Invoke(dataList);
+                    
+//                     await Task.Yield();
+//                 }
+//                 while (!asyncOperation.isDone && !token.IsCancellationRequested);
+                
+//                 onComplete?.Invoke();
+//             }
+//         }
+
+//         /// <summary>
+//         /// 向指定路径发送带有多部分数据表单的 HTTP 请求
+//         /// </summary>
+//         /// <param name="path">发送请求的路径</param>
+//         /// <param name="form">要与请求一起上传的多部分数据表单</param>
+//         /// <typeparam name="T">请求的响应类型</typeparam>
+//         /// <returns>包含指定类型请求响应的 Task</returns>
+//         private async Task<T> DispatchRequest<T>(string path, List<IMultipartFormSection> form) where T: IResponse
+//         {
+//             T data;
+            
+//             using (var request = new UnityWebRequest(path, "POST"))
+//             {
+//                 request.SetHeaders(Configuration);
+//                 var boundary = UnityWebRequest.GenerateBoundary();
+//                 var formSections = UnityWebRequest.SerializeFormSections(form, boundary);
+//                 var contentType = $"{ContentType.MultipartFormData}; boundary={Encoding.UTF8.GetString(boundary)}";
+//                 request.uploadHandler = new UploadHandlerRaw(formSections) {contentType = contentType};
+//                 request.downloadHandler = new DownloadHandlerBuffer();
+//                 var asyncOperation = request.SendWebRequest();
+
+//                 while (!asyncOperation.isDone) await Task.Yield();
+                
+//                 data = JsonConvert.DeserializeObject<T>(request.downloadHandler.text, jsonSerializerSettings);
+//             }
+            
+//             if (data != null && data.Error != null)
+//             {
+//                 ApiError error = data.Error;
+//                 Debug.LogError($"错误信息: {error.Message}\n错误类型: {error.Type}\n");
+//             }
+
+//             return data;
+//         }
+
+//         /// <summary>
+//         /// 从给定的包含参数的请求对象创建字节数组有效载荷
+//         /// </summary>
+//         /// <param name="request">包含有效载荷参数的请求对象</param>
+//         /// <typeparam name="T">请求对象的类型</typeparam>
+//         /// <returns>字节数组有效载荷</returns>
+//         private byte[] CreatePayload<T>(T request)
+//         {
+//             var json = JsonConvert.SerializeObject(request, jsonSerializerSettings);
+//             return Encoding.UTF8.GetBytes(json);
+//         }
+
+//         /// <summary>
+//         /// 列出当前可用的模型，并提供每个模型的基本信息，如所有者和可用性
+//         /// </summary>
+//         public async Task<ListModelsResponse> ListModels()
+//         {
+//             var path = $"{BASE_PATH}/models";
+//             return await DispatchRequest<ListModelsResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 检索模型实例，提供有关模型的基本信息，如所有者和权限
+//         /// </summary>
+//         /// <param name="id">用于此请求的模型 ID</param>
+//         /// <returns>参见 <see cref="Model"/></returns>
+//         public async Task<OpenAIModel> RetrieveModel(string id)
+//         {
+//             var path = $"{BASE_PATH}/models/{id}";
+//             return await DispatchRequest<OpenAIModelResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+
+//         /// <summary>
+//         /// 创建类似 ChatGPT 的聊天完成请求
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateChatCompletionRequest"/></param>
+//         /// <returns>参见 <see cref="CreateChatCompletionResponse"/></returns>
+//         public async Task<CreateChatCompletionResponse> CreateChatCompletion(CreateChatCompletionRequest request)
+//         {
+//             var path = $"{BASE_PATH}/chat/completions";
+//             var payload = CreatePayload(request);
+            
+//             return await DispatchRequest<CreateChatCompletionResponse>(path, UnityWebRequest.kHttpVerbPOST, payload);
+//         }
+        
+//         /// <summary>
+//         /// 创建类似 ChatGPT 的聊天完成请求，支持流式响应
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateChatCompletionRequest"/></param>
+//         /// <param name="onResponse">流响应更新时调用的回调函数</param>
+//         /// <param name="onComplete">流响应完成时调用的回调函数</param>
+//         /// <param name="token">用于取消请求的取消令牌</param>
+//         public void CreateChatCompletionAsync(CreateChatCompletionRequest request, Action<List<CreateChatCompletionResponse>> onResponse, Action onComplete, CancellationTokenSource token)
+//         {
+//             request.Stream = true;
+//             var path = $"{BASE_PATH}/chat/completions";
+//             var payload = CreatePayload(request);
+            
+//             DispatchRequest(path, UnityWebRequest.kHttpVerbPOST, onResponse, onComplete, token, payload);
+//         }
+        
+//         /// <summary>
+//         /// 根据提示创建图像
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateImageRequest"/></param>
+//         /// <returns>参见 <see cref="CreateImageResponse"/></returns>
+//         public async Task<CreateImageResponse> CreateImage(CreateImageRequest request)
+//         {
+//             var path = $"{BASE_PATH}/images/generations";
+//             var payload = CreatePayload(request);
+//             return await DispatchRequest<CreateImageResponse>(path, UnityWebRequest.kHttpVerbPOST, payload);
+//         }
+        
+//         /// <summary>
+//         /// 根据原始图像和提示创建编辑或扩展的图像
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateImageEditRequest"/></param>
+//         /// <returns>参见 <see cref="CreateImageResponse"/></returns>
+//         public async Task<CreateImageResponse> CreateImageEdit(CreateImageEditRequest request)
+//         {
+//             var path = $"{BASE_PATH}/images/edits";
+
+//             var form = new List<IMultipartFormSection>();
+//             form.AddFile(request.Image, "image", "image/png");
+//             form.AddFile(request.Mask, "mask", "image/png");
+//             form.AddValue(request.Prompt, "prompt");
+//             form.AddValue(request.N, "n");
+//             form.AddValue(request.Size, "size");
+//             form.AddValue(request.ResponseFormat, "response_format");
+            
+//             return await DispatchRequest<CreateImageResponse>(path, form);
+//         }
+        
+//         /// <summary>
+//         /// 创建给定图像的变体
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateImageVariationRequest"/></param>
+//         /// <returns>参见 <see cref="CreateImageResponse"/></returns>
+//         public async Task<CreateImageResponse> CreateImageVariation(CreateImageVariationRequest request)
+//         {
+//             var path = $"{BASE_PATH}/images/variations";
+            
+//             var form = new List<IMultipartFormSection>();
+//             form.AddFile(request.Image, "image", "image/png");
+//             form.AddValue(request.N, "n");
+//             form.AddValue(request.Size, "size");
+//             form.AddValue(request.ResponseFormat, "response_format");
+//             form.AddValue(request.User, "user");
+            
+//             return await DispatchRequest<CreateImageResponse>(path, form);
+//         }
+       
+//         /// <summary>
+//         /// 创建表示输入文本的嵌入向量
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateEmbeddingsRequest"/></param>
+//         /// <returns>参见 <see cref="CreateEmbeddingsResponse"/></returns>
+//         public async Task<CreateEmbeddingsResponse> CreateEmbeddings(CreateEmbeddingsRequest request)
+//         {
+//             var path = $"{BASE_PATH}/embeddings";
+//             var payload = CreatePayload(request);
+//             return await DispatchRequest<CreateEmbeddingsResponse>(path, UnityWebRequest.kHttpVerbPOST, payload);
+//         }
+
+//         /// <summary>
+//         /// 将音频转录为输入语言
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateAudioTranscriptionsRequest"/></param>
+//         /// <returns>参见 <see cref="CreateAudioResponse"/></returns>
+//         public async Task<CreateAudioResponse> CreateAudioTranscription(CreateAudioTranscriptionsRequest request)
+//         {
+//             var path = $"{BASE_PATH}/audio/transcriptions";
+            
+//             var form = new List<IMultipartFormSection>();
+//             if (string.IsNullOrEmpty(request.File))
+//             {
+//                 form.AddData(request.FileData, "file", $"audio/{Path.GetExtension(request.File)}");
+//             }
+//             else
+//             {
+//                 form.AddFile(request.File, "file", $"audio/{Path.GetExtension(request.File)}");
+//             }
+//             form.AddValue(request.Model, "model");
+//             form.AddValue(request.Prompt, "prompt");
+//             form.AddValue(request.ResponseFormat, "response_format");
+//             form.AddValue(request.Temperature, "temperature");
+//             form.AddValue(request.Language, "language");
+
+//             return await DispatchRequest<CreateAudioResponse>(path, form);
+//         }
+        
+//         /// <summary>
+//         /// 将音频翻译成英语
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateAudioTranslationRequest"/></param>
+//         /// <returns>参见 <see cref="CreateAudioResponse"/></returns>
+//         public async Task<CreateAudioResponse> CreateAudioTranslation(CreateAudioTranslationRequest request)
+//         {
+//             var path = $"{BASE_PATH}/audio/translations";
+            
+//             var form = new List<IMultipartFormSection>();
+//             if (string.IsNullOrEmpty(request.File))
+//             {
+//                 form.AddData(request.FileData, "file", $"audio/{Path.GetExtension(request.File)}");
+//             }
+//             else
+//             {
+//                 form.AddFile(request.File, "file", $"audio/{Path.GetExtension(request.File)}");
+//             }
+//             form.AddValue(request.Model, "model");
+//             form.AddValue(request.Prompt, "prompt");
+//             form.AddValue(request.ResponseFormat, "response_format");
+//             form.AddValue(request.Temperature, "temperature");
+
+//             return await DispatchRequest<CreateAudioResponse>(path, form);
+//         }
+        
+//         /// <summary>
+//         /// 返回属于用户组织的文件列表
+//         /// </summary>
+//         /// <returns>参见 <see cref="ListFilesResponse"/></returns>
+//         public async Task<ListFilesResponse> ListFiles()
+//         {
+//             var path = $"{BASE_PATH}/files";
+//             return await DispatchRequest<ListFilesResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 上传包含文档的文件，以便在各种端点/功能中使用
+//         /// 目前，一个组织上传的所有文件的大小最多可达 1 GB
+//         /// 如果需要增加存储限制，请联系我们
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateFileRequest"/></param>
+//         /// <returns>参见 <see cref="OpenAIFile"/></returns>
+//         public async Task<OpenAIFile> CreateFile(CreateFileRequest request)
+//         {
+//             var path = $"{BASE_PATH}/files";
+            
+//             var form = new List<IMultipartFormSection>();
+//             form.AddFile(request.File, "file", "application/json");
+//             form.AddValue(request.Purpose, "purpose");
+            
+//             return await DispatchRequest<OpenAIFileResponse>(path, form);
+//         }
+        
+//         /// <summary>
+//         /// 删除文件
+//         /// </summary>
+//         /// <param name="id">用于此请求的文件 ID</param>
+//         /// <returns>参见 <see cref="DeleteResponse"/></returns>
+//         public async Task<DeleteResponse> DeleteFile(string id)
+//         {
+//             var path = $"{BASE_PATH}/files/{id}";
+//             return await DispatchRequest<DeleteResponse>(path, UnityWebRequest.kHttpVerbDELETE);
+//         }
+        
+//         /// <summary>
+//         /// 返回特定文件的信息
+//         /// </summary>
+//         /// <param name="id">用于此请求的文件 ID</param>
+//         /// <returns>参见 <see cref="OpenAIFile"/></returns>
+//         public async Task<OpenAIFile> RetrieveFile(string id)
+//         {
+//             var path = $"{BASE_PATH}/files/{id}";
+//             return await DispatchRequest<OpenAIFileResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 返回指定文件的内容
+//         /// </summary>
+//         /// <param name="id">用于此请求的文件 ID</param>
+//         /// <returns>参见 <see cref="OpenAIFile"/></returns>
+//         public async Task<OpenAIFile> DownloadFile(string id)
+//         {
+//             var path = $"{BASE_PATH}/files/{id}/content";
+//             return await DispatchRequest<OpenAIFileResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 管理微调作业，以根据特定的训练数据定制模型
+//         /// 相关指南：<a href="https://beta.openai.com/docs/guides/fine-tuning">微调模型</a>
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateFineTuneRequest"/></param>
+//         /// <returns>参见 <see cref="FineTune"/></returns>
+//         public async Task<FineTune> CreateFineTune(CreateFineTuneRequest request)
+//         {
+//             var path = $"{BASE_PATH}/fine-tunes";
+//             var payload = CreatePayload(request);
+//             return await DispatchRequest<FineTuneResponse>(path, UnityWebRequest.kHttpVerbPOST, payload);
+//         }
+        
+//         /// <summary>
+//         /// 列出您组织的微调作业
+//         /// </summary>
+//         /// <returns>参见 <see cref="ListFineTunesResponse"/></returns>
+//         public async Task<ListFineTunesResponse> ListFineTunes()
+//         {
+//             var path = $"{BASE_PATH}/fine-tunes";
+//             return await DispatchRequest<ListFineTunesResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 获取微调作业的信息
+//         /// </summary>
+//         /// <param name="id">微调作业的 ID</param>
+//         /// <returns>参见 <see cref="FineTune"/></returns>
+//         public async Task<FineTune> RetrieveFineTune(string id)
+//         {
+//             var path = $"{BASE_PATH}/fine-tunes/{id}";
+//             return await DispatchRequest<FineTuneResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 立即取消微调作业
+//         /// </summary>
+//         /// <param name="id">要取消的微调作业的 ID</param>
+//         /// <returns>参见 <see cref="FineTune"/></returns>
+//         public async Task<FineTune> CancelFineTune(string id)
+//         {
+//             var path = $"{BASE_PATH}/fine-tunes/{id}/cancel";
+//             return await DispatchRequest<FineTuneResponse>(path, UnityWebRequest.kHttpVerbPOST);
+//         }
+        
+//         /// <summary>
+//         /// 获取微调作业的细粒度状态更新
+//         /// </summary>
+//         /// <param name="id">要获取事件的微调作业的 ID</param>
+//         /// <param name="stream">是否为微调作业流式传输事件
+//         /// 如果设置为 true，事件将作为仅数据的<a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#event_stream_format">服务器发送事件</a>在可用时发送
+//         /// 当作业完成（成功、取消或失败）时，流将以 data: [DONE] 消息终止
+//         /// 如果设置为 false，则仅返回到目前为止生成的事件</param>
+//         /// <returns>参见 <see cref="ListFineTuneEventsResponse"/></returns>
+//         public async Task<ListFineTuneEventsResponse> ListFineTuneEvents(string id, bool stream = false)
+//         {
+//             var path = $"{BASE_PATH}/fine-tunes/{id}/events?stream={stream}";
+//             return await DispatchRequest<ListFineTuneEventsResponse>(path, UnityWebRequest.kHttpVerbGET);
+//         }
+        
+//         /// <summary>
+//         /// 删除微调模型。您必须在组织中具有所有者角色
+//         /// </summary>
+//         /// <param name="model">要删除的模型</param>
+//         /// <returns>参见 <see cref="DeleteResponse"/></returns>
+//         public async Task<DeleteResponse> DeleteFineTunedModel(string model)
+//         {
+//             var path = $"{BASE_PATH}/models/{model}";
+//             return await DispatchRequest<DeleteResponse>(path, UnityWebRequest.kHttpVerbDELETE);
+//         }
+
+//         /// <summary>
+//         /// 判断文本是否违反 OpenAI 的内容政策
+//         /// </summary>
+//         /// <param name="request">参见 <see cref="CreateModerationRequest"/></param>
+//         /// <returns>参见 <see cref="CreateModerationResponse"/></returns>
+//         public async Task<CreateModerationResponse> CreateModeration(CreateModerationRequest request)
+//         {
+//             var path = $"{BASE_PATH}/moderations";
+//             var payload = CreatePayload(request);
+//             return await DispatchRequest<CreateModerationResponse>(path, UnityWebRequest.kHttpVerbPOST, payload);
+//         }
+//     }
+// }

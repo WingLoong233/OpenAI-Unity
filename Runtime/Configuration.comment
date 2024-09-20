@@ -1,0 +1,64 @@
+// using System;
+// using System.IO;
+// using UnityEngine;
+// using Newtonsoft.Json;
+// using Newtonsoft.Json.Serialization;
+
+// namespace OpenAI
+// {
+//     // Configuration 类用于管理 OpenAI API 的认证信息和序列化设置
+//     public class Configuration
+//     {
+//         // Auth 属性存储 API 密钥和组织信息
+//         public Auth Auth { get; }
+        
+//         // 用于序列化和反序列化 PascalCase 请求对象字段为 JSON 的 snake_case 格式
+//         // 在创建 JSON 字符串时忽略空字段
+//         private readonly JsonSerializerSettings jsonSerializerSettings = new JsonSerializerSettings()
+//         {
+//             // 忽略值为 null 的属性
+//             NullValueHandling = NullValueHandling.Ignore, 
+//             // 使用自定义的命名策略进行属性名称转换
+//             ContractResolver = new DefaultContractResolver()
+//             {
+//                 NamingStrategy = new CustomNamingStrategy()
+//             }
+//         };
+        
+//         // 构造函数，可选参数为 API 密钥和组织 ID
+//         public Configuration(string apiKey = null, string organization = null)
+//         {
+//             // 如果未提供 API 密钥，尝试从本地文件加载
+//             if (apiKey == null)
+//             {
+//                 // 获取用户主目录路径
+//                 var userPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+//                 // 构造 auth.json 文件的完整路径
+//                 var authPath = $"{userPath}/.openai/auth.json";
+
+//                 // 检查 auth.json 文件是否存在
+//                 if (File.Exists(authPath))
+//                 {
+//                     // 读取 auth.json 文件内容
+//                     var json = File.ReadAllText(authPath);
+//                     // 反序列化 JSON 内容为 Auth 对象
+//                     Auth = JsonConvert.DeserializeObject<Auth>(json, jsonSerializerSettings);
+//                 }
+//                 else
+//                 {
+//                     // 如果文件不存在，输出错误日志
+//                     Debug.LogError("API Key is null and auth.json does not exist. Please check https://github.com/srcnalt/OpenAI-Unity#saving-your-credentials");
+//                 }
+//             }
+//             else
+//             {
+//                 // 如果提供了 API 密钥，创建新的 Auth 对象
+//                 Auth = new Auth()
+//                 {
+//                     ApiKey = apiKey,
+//                     Organization = organization
+//                 };
+//             }
+//         }
+//     }
+// }

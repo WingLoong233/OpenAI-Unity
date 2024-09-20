@@ -36,7 +36,9 @@ namespace OpenAI
         }
 
         /// OpenAI API base path for requests.
-        private const string BASE_PATH = "https://api.openai.com/v1";
+        // private const string BASE_PATH = "https://api.openai.com/v1";
+        // OneAPI API base path for requests.
+        private const string BASE_PATH = "http://localhost:3000/v1"
 
         public OpenAIApi(string apiKey = null, string organization = null)
         {
